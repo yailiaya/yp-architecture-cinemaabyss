@@ -6,7 +6,18 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 )
+
+// Config — конфигурация прокси-сервиса, собирается из переменных окружения.
+type Config struct {
+	Port                   string
+	MonolithURL            string
+	MoviesServiceURL       string
+	EventsServiceURL       string
+	GradualMigration       bool
+	MoviesMigrationPercent int
+}
 
 /*
    PORT: 8000
@@ -18,9 +29,7 @@ import (
    MOVIES_MIGRATION_PERCENT: "50" # процент миграции
 */
 
-func main() {
-	fmt.Println("Start Proxy.")
-
+func loadConfig() *Config {
 	fmt.Println("__ reading config:")
 	port := os.Getenv("PORT") // "" если не задано
 	monolith_url := os.Getenv("MONOLITH_URL")
@@ -38,15 +47,58 @@ func main() {
 	fmt.Println("MOVIES_MIGRATION_PERCENT: ", proxy_percent)
 	fmt.Println("__ end of config.")
 
-	http.HandleFunc("/api/proxy/health", handlerHealth)
-	//http.HandleFunc("/api/users", handleUsers)
-	//http.HandleFunc("/api/movies/health", handlerHealth)
+	gradualMigrationSwitch, _ := strconv.ParseBool(gradual_switch)
+	proxyPercent, _ := strconv.Atoi(proxy_percent)
 
-	log.Printf("Starting movies microservice on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	return &Config{
+		Port:                   port,
+		MonolithURL:            monolith_url,
+		MoviesServiceURL:       movies_url,
+		EventsServiceURL:       events_url,
+		GradualMigration:       gradualMigrationSwitch,
+		MoviesMigrationPercent: proxyPercent,
+	}
+}
+
+func main() {
+	fmt.Println("Start Proxy.")
+	cfg := loadConfig()
+
+	fmt.Println("__ config start")
+	fmt.Println("PORT: ", cfg.Port)
+	fmt.Println("MONOLITH_URL: ", cfg.MonolithURL)
+	fmt.Println("MOVIES_SERVICE_URL: ", cfg.MoviesServiceURL)
+	fmt.Println("EVENTS_SERVICE_URL: ", cfg.EventsServiceURL)
+	fmt.Println("GRADUAL_MIGRATION: ", cfg.GradualMigration)
+	fmt.Println("MOVIES_MIGRATION_PERCENT: ", cfg.MoviesMigrationPercent)
+	fmt.Println("__ config end.")
+
+	http.HandleFunc("/api/proxy/health", handlerHealth)
+
+	//http.HandleFunc("/api/movies", handlerMovies)
+	//http.HandleFunc("/api/movies/", handlerMovies)
+
+	log.Printf("Starting movies microservice on port %s", cfg.Port)
+	log.Fatal(http.ListenAndServe(":"+cfg.Port, nil))
 }
 
 func handlerHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"status": true})
 }
+
+/*
+func makeHandler(сап *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// db доступна здесь
+		rows, _ := db.Query("SELECT ...")
+		_ = rows
+	}
+}
+
+func handlerMovies(w http.ResponseWriter, r *http.Request) {
+	r.Host := movies_url
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"status": true})
+}
+*/
