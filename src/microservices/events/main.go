@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 // Config — конфигурация прокси-сервиса, собирается из переменных окружения.
@@ -31,6 +32,15 @@ type User struct {
 	Username  string `json:"username"`
 	Action    string `json:"action"`
 	Timestamp string `json:"timestamp"`
+}
+
+type Payment struct {
+	PaymentID  int       `json:"payment_id"`
+	UserID     int       `json:"user_id"`
+	Amount     float64   `json:"amount"`
+	Status     string    `json:"status"`
+	Timestamp  time.Time `json:"timestamp"`
+	MethodType string    `json:"method_type"`
 }
 
 func loadConfig() *Config {
@@ -61,7 +71,11 @@ func main() {
 
 	mux.HandleFunc("/health", handlerHealth)
 
-	mux.HandleFunc("/api/events/movie", handlerMovieCreateEvent)
+	mux.HandleFunc("/api/events/movie", handlerMovieEvent)
+
+	mux.HandleFunc("/api/events/user", handlerUserEvent)
+
+	mux.HandleFunc("/api/events/payment", handlerPaymentEvent)
 
 	//http.HandleFunc("/api/movies", handlerMovies)
 	//http.HandleFunc("/api/movies/", handlerMovies)
@@ -76,8 +90,8 @@ func handlerHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"status": true})
 }
 
-func handlerMovieCreateEvent(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("- handled - movie create event")
+func handlerMovieEvent(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("- handled - movie event")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -92,10 +106,58 @@ func handlerMovieCreateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("movie %d (%s) did %s at %d",
+	log.Printf("UserID - %d : Title - %s : Action - %s MovieID - %d",
 		movie.UserID, movie.Title, movie.Action, movie.MovieID)
 
 	// Now `event` is a typed object
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(movie)
+}
+
+func handlerUserEvent(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("- handled - user event")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var user User
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields() // optional: reject unexpected fields
+
+	if err := dec.Decode(&user); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("user %d (%s) did %s at %s",
+		user.UserID, user.Username, user.Action, user.Timestamp)
+
+	// Now `event` is a typed object
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+func handlerPaymentEvent(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("- handled - payment event")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payment Payment
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields() // optional: reject unexpected fields
+
+	if err := dec.Decode(&payment); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("user - %d : PaymentID - %d : Amount is - %.2f : Status - %s at %s with method - %s",
+		payment.UserID, payment.PaymentID, payment.Amount, payment.Status, payment.Timestamp, payment.MethodType)
+
+	// Now `event` is a typed object
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(payment)
 }
