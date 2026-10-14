@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strconv"
 )
@@ -60,6 +63,24 @@ func loadConfig() *Config {
 	}
 }
 
+func newProxy(target *url.URL) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			pr.SetXForwarded()
+			pr.Out.Host = target.Host
+		},
+	}
+}
+
+func mustParse(raw string) *url.URL {
+	u, err := url.Parse(raw)
+	if err != nil {
+		log.Fatalf("bad url %q: %v", raw, err)
+	}
+	return u
+}
+
 func main() {
 	fmt.Println("Start Proxy.")
 	cfg := loadConfig()
@@ -73,32 +94,56 @@ func main() {
 	fmt.Println("MOVIES_MIGRATION_PERCENT: ", cfg.MoviesMigrationPercent)
 	fmt.Println("__ config end.")
 
-	http.HandleFunc("/api/proxy/health", handlerHealth)
+	if cfg.MoviesMigrationPercent < 0 || cfg.MoviesMigrationPercent > 100 {
+		log.Fatalf("percent out of range: %d", cfg.MoviesMigrationPercent)
+	}
+
+	moviesProxy := newProxy(mustParse("http://movies-service:8081"))
+	monolithProxy := newProxy(mustParse("http://monolith:8080"))
+
+	useMovies := func() bool {
+		if !cfg.GradualMigration {
+			return false
+		}
+		if cfg.MoviesMigrationPercent <= 0 {
+			return false
+		}
+		if cfg.MoviesMigrationPercent >= 100 {
+			return true
+		}
+		return rand.Intn(100) < cfg.MoviesMigrationPercent
+	}
+
+	mux := http.NewServeMux()
+
+	moviesHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("-> enter  %s %s", r.Method, r.URL.Path)
+		fmt.Println("-> enter  %s %s", r.Method, r.URL.Path)
+		if useMovies() {
+			log.Printf("-> movies  %s %s", r.Method, r.URL.Path)
+			fmt.Println("-> movies  %s %s", r.Method, r.URL.Path)
+			moviesProxy.ServeHTTP(w, r)
+			return
+		}
+		log.Printf("-> monolith  %s %s", r.Method, r.URL.Path)
+		fmt.Println("-> monolith  %s %s", r.Method, r.URL.Path)
+		monolithProxy.ServeHTTP(w, r)
+	}
+
+	mux.HandleFunc("/health", handlerHealth)
+	mux.HandleFunc("/api/movies/", moviesHandler)
+	mux.HandleFunc("/api/movies", moviesHandler)
+	mux.Handle("/", monolithProxy)
 
 	//http.HandleFunc("/api/movies", handlerMovies)
 	//http.HandleFunc("/api/movies/", handlerMovies)
 
 	log.Printf("Starting movies microservice on port %s", cfg.Port)
-	log.Fatal(http.ListenAndServe(":"+cfg.Port, nil))
+	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))
 }
 
 func handlerHealth(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("- handled - health check")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"status": true})
 }
-
-/*
-func makeHandler(сап *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// db доступна здесь
-		rows, _ := db.Query("SELECT ...")
-		_ = rows
-	}
-}
-
-func handlerMovies(w http.ResponseWriter, r *http.Request) {
-	r.Host := movies_url
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"status": true})
-}
-*/
