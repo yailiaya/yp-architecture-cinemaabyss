@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/IBM/sarama"
 )
 
 // Config — конфигурация прокси-сервиса, собирается из переменных окружения.
@@ -80,6 +82,27 @@ func main() {
 	//http.HandleFunc("/api/movies", handlerMovies)
 	//http.HandleFunc("/api/movies/", handlerMovies)
 
+	// Kafka set
+	// 1. Define brokers and configuration
+	brokers := []string{cfg.KafkaBrokers}
+	config := sarama.NewConfig()
+
+	// Critical: Sarama requires this to be true for sync producers to return success.
+	config.Producer.Return.Successes = true
+
+	// Optional: Set Kafka version and required acknowledgments
+	config.Version = sarama.V0_10_2_0
+	// config.Producer.RequiredAcks = sarama.WaitForAll // Strongest guarantee (acks=all)
+
+	// 2. Create a new synchronous producer
+	producer, err := sarama.NewSyncProducer(brokers, config)
+	if err != nil {
+		log.Fatalf("Failed to create producer: %v", err)
+	}
+	defer producer.Close()
+
+	// end of kafka set
+
 	log.Printf("Starting events microservice on port %s", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))
 }
@@ -109,9 +132,26 @@ func handlerMovieEvent(w http.ResponseWriter, r *http.Request) {
 	log.Printf("UserID - %d : Title - %s : Action - %s MovieID - %d",
 		movie.UserID, movie.Title, movie.Action, movie.MovieID)
 
-	// Now `event` is a typed object
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(movie)
+	valueBytes, err := json.Marshal(movie)
+	if err != nil {
+		log.Fatalf("Failed to marshal movie to JSON: %v", err)
+	}
+
+	// 3. Construct the message for Kafka
+	message := &sarama.ProducerMessage{
+		Topic: "movies",
+		Key:   sarama.StringEncoder(movie.MovieID),
+		Value: sarama.StringEncoder(valueBytes /*r.Body*/),
+	}
+
+	// 4. Send the message (blocking)
+	partition, offset, err := producer.SendMessage(message)
+	if err != nil {
+		log.Printf("Failed to send message: %v", err)
+		return
+	}
+
+	log.Printf("Message sent successfully! Partition: %d, Offset: %d", partition, offset)
 }
 
 func handlerUserEvent(w http.ResponseWriter, r *http.Request) {
