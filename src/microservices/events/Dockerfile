@@ -1,9 +1,9 @@
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26 AS builder
 
 WORKDIR /app
 
 # Copy go mod and sum files
-COPY go.mod ./
+COPY go.mod go.sum ./
 
 # Download all dependencies
 RUN go mod download

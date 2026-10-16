@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -60,6 +61,37 @@ func loadConfig() *Config {
 	}
 }
 
+// App holds shared dependencies (Kafka producer, config) for all handlers.
+type App struct {
+	cfg      *Config
+	producer sarama.SyncProducer
+}
+
+// publish marshals the payload to JSON and sends it to the given topic.
+// `key` is used for partition routing; pass "" to let Sarama balance randomly.
+func (a *App) publish(topic, key string, payload interface{}) error {
+	valueBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	msg := &sarama.ProducerMessage{
+		Topic: topic,
+		Value: sarama.ByteEncoder(valueBytes),
+	}
+	if key != "" {
+		msg.Key = sarama.StringEncoder(key)
+	}
+
+	partition, offset, err := a.producer.SendMessage(msg)
+	if err != nil {
+		return fmt.Errorf("send message: %w", err)
+	}
+
+	log.Printf("Message sent to %s [partition=%d offset=%d]", topic, partition, offset)
+	return nil
+}
+
 func main() {
 	fmt.Println("Start Proxy.")
 	cfg := loadConfig()
@@ -71,13 +103,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/health", handlerHealth)
-
-	mux.HandleFunc("/api/events/movie", handlerMovieEvent)
-
-	mux.HandleFunc("/api/events/user", handlerUserEvent)
-
-	mux.HandleFunc("/api/events/payment", handlerPaymentEvent)
+	mux.HandleFunc("/api/events/health", handlerHealth)
 
 	//http.HandleFunc("/api/movies", handlerMovies)
 	//http.HandleFunc("/api/movies/", handlerMovies)
@@ -101,6 +127,11 @@ func main() {
 	}
 	defer producer.Close()
 
+	app := &App{cfg: cfg, producer: producer}
+
+	mux.HandleFunc("/api/events/movie", app.handlerMovieEvent)
+	mux.HandleFunc("/api/events/user", app.handlerUserEvent)
+	mux.HandleFunc("/api/events/payment", app.handlerPaymentEvent)
 	// end of kafka set
 
 	log.Printf("Starting events microservice on port %s", cfg.Port)
@@ -113,7 +144,7 @@ func handlerHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"status": true})
 }
 
-func handlerMovieEvent(w http.ResponseWriter, r *http.Request) {
+func (a *App) handlerMovieEvent(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("- handled - movie event")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -132,29 +163,20 @@ func handlerMovieEvent(w http.ResponseWriter, r *http.Request) {
 	log.Printf("UserID - %d : Title - %s : Action - %s MovieID - %d",
 		movie.UserID, movie.Title, movie.Action, movie.MovieID)
 
-	valueBytes, err := json.Marshal(movie)
-	if err != nil {
-		log.Fatalf("Failed to marshal movie to JSON: %v", err)
-	}
-
-	// 3. Construct the message for Kafka
-	message := &sarama.ProducerMessage{
-		Topic: "movies",
-		Key:   sarama.StringEncoder(movie.MovieID),
-		Value: sarama.StringEncoder(valueBytes /*r.Body*/),
-	}
-
-	// 4. Send the message (blocking)
-	partition, offset, err := producer.SendMessage(message)
-	if err != nil {
-		log.Printf("Failed to send message: %v", err)
+	// Key by MovieID so all events for the same movie go to the same partition.
+	key := strconv.Itoa(movie.MovieID)
+	if err := a.publish("movies", key, movie); err != nil {
+		log.Printf("publish movie failed: %v", err)
+		http.Error(w, "failed to publish event", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Message sent successfully! Partition: %d, Offset: %d", partition, offset)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-func handlerUserEvent(w http.ResponseWriter, r *http.Request) {
+func (a *App) handlerUserEvent(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("- handled - user event")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -173,12 +195,19 @@ func handlerUserEvent(w http.ResponseWriter, r *http.Request) {
 	log.Printf("user %d (%s) did %s at %s",
 		user.UserID, user.Username, user.Action, user.Timestamp)
 
-	// Now `event` is a typed object
+	key := strconv.Itoa(user.UserID)
+	if err := a.publish("users", key, user); err != nil {
+		log.Printf("publish user failed: %v", err)
+		http.Error(w, "failed to publish event", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-func handlerPaymentEvent(w http.ResponseWriter, r *http.Request) {
+func (a *App) handlerPaymentEvent(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("- handled - payment event")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -197,7 +226,14 @@ func handlerPaymentEvent(w http.ResponseWriter, r *http.Request) {
 	log.Printf("user - %d : PaymentID - %d : Amount is - %.2f : Status - %s at %s with method - %s",
 		payment.UserID, payment.PaymentID, payment.Amount, payment.Status, payment.Timestamp, payment.MethodType)
 
-	// Now `event` is a typed object
+	key := strconv.Itoa(payment.PaymentID)
+	if err := a.publish("payments", key, payment); err != nil {
+		log.Printf("publish payment failed: %v", err)
+		http.Error(w, "failed to publish event", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(payment)
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
