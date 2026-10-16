@@ -165,7 +165,7 @@ func (a *App) handlerMovieEvent(w http.ResponseWriter, r *http.Request) {
 
 	// Key by MovieID so all events for the same movie go to the same partition.
 	key := strconv.Itoa(movie.MovieID)
-	if err := a.publish("movies", key, movie); err != nil {
+	if err := a.publish("movie-events", key, movie); err != nil {
 		log.Printf("publish movie failed: %v", err)
 		http.Error(w, "failed to publish event", http.StatusInternalServerError)
 		return
@@ -196,7 +196,7 @@ func (a *App) handlerUserEvent(w http.ResponseWriter, r *http.Request) {
 		user.UserID, user.Username, user.Action, user.Timestamp)
 
 	key := strconv.Itoa(user.UserID)
-	if err := a.publish("users", key, user); err != nil {
+	if err := a.publish("user-events", key, user); err != nil {
 		log.Printf("publish user failed: %v", err)
 		http.Error(w, "failed to publish event", http.StatusInternalServerError)
 		return
@@ -227,7 +227,7 @@ func (a *App) handlerPaymentEvent(w http.ResponseWriter, r *http.Request) {
 		payment.UserID, payment.PaymentID, payment.Amount, payment.Status, payment.Timestamp, payment.MethodType)
 
 	key := strconv.Itoa(payment.PaymentID)
-	if err := a.publish("payments", key, payment); err != nil {
+	if err := a.publish("payment-events", key, payment); err != nil {
 		log.Printf("publish payment failed: %v", err)
 		http.Error(w, "failed to publish event", http.StatusInternalServerError)
 		return
