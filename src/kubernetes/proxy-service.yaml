@@ -1,0 +1,5 @@
+ spec:
+      containers:
+      - name: proxy-service
+        image: ghcr.io/yailiaya/yp-architecture-cinemaabyss/proxy-service:latest
+
