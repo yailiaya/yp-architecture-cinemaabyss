@@ -36,7 +36,14 @@ services:
     image: wurstmeister/kafka:2.13-2.7.0
     container_name: cinemaabyss-kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9092' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     ports:
       - "9092:9092"
     environment:
@@ -89,8 +96,11 @@ services:
       dockerfile: Dockerfile
     container_name: cinemaabyss-events-service
     depends_on:
-      - postgres
-      - kafka
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: on-failure
     ports:
       - "8082:8082"
     environment:
@@ -106,9 +116,12 @@ services:
       dockerfile: Dockerfile
     container_name: cinemaabyss-proxy-service
     depends_on:
-      - monolith
-      - movies-service
-      - events-service
+      monolith:
+        condition: service_started
+      movies-service:
+        condition: service_started
+      events-service:
+        condition: service_started
     ports:
       - "8000:8000"
     environment:
