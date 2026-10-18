@@ -1,0 +1,68 @@
+@startuml
+title FitLife Container Diagram
+
+top to bottom direction
+
+!includeurl https://raw.githubusercontent.com/RicardoNiepel/C4-PlantUML/master/C4_Component.puml
+
+Person(user, "User", "A user of Warmhouse system")
+Person(admin, "Administrator", "An administrator managing the system")
+System(CinemaAbyssSystem, "CinemaAbyss System", "System managing cinema and members")
+
+Container_Boundary(CinemaAbyssSystem, "CinemaAbyss System") {
+  Container(WebFrontApp, "Web Front Application", "Vue, JavaScript", "Web interface")
+  Container(MobileApp, "Mobile Front Application", "Vue, JavaScript", "Mobile interface")
+  Container(SmartTV, "SmartTV Front Application", "Vue, JavaScript", "SmartTV interface")
+  Container(APIGateway, "API Gateway", "Nginx", "API Gateway")
+  Container(WebApp, "BFFs for web, mobile and SmartTV", "Go", "Handles user interactions")
+
+  Container(UserManagementService, "User Management Service", "Go + PostgreSQL DB", "User Profile + Favourites Movies")
+  Container(PaymentService, "Payment Service", "Go + PostgreSQL DB", "Processes payments")
+  Container(MoviesService, "Movies Service", "Go + PostgreSQL DB", "Movies Meta Data + Search")
+  Container(FeedbackService, "Reviews Service", "Go", "Reviews Giving and Storage")
+  Container(MongoDB, "MongoDB", "MongoDB", "Storage Reviews")
+  Container(EventsService, "Events Loging Service", "Go + Kafka Integration", "Events Loging")
+  Container(OnlineCinemaTheaterIntegrator, "Online Cinema Theater Integrator", "Go", "Integrate Online Services")
+
+  Container(Kafka, "Kafka", "Kafka", "Kafka MQ")
+  Container(StoreService, "ELK", "Elasticsearch + Logstash + Kibana", "Store and index logs and telemetry")
+
+  Container(ReportingService, "Reporting Service", "Go", "Provides logs and telemetry as a report")
+  Container(UserManagementDB, "User Management DB", "PostgreSQL", "Store profiles and Favourites")
+}
+
+System_Ext(payment_api, "Payment System API", "External API for payment integration")
+System_Ext(recommendations, "Recommendations System", "RabbitMQ External Recommendation System")
+System_Ext(OnlineTheaters, "Online Cinema Theater", "Online Cinema Theater")
+
+Rel(user, WebFrontApp, "Uses the system")
+Rel(user, MobileApp, "Uses the system")
+Rel(user, SmartTV, "Uses the system")
+Rel(admin, WebFrontApp,"Manages the system")
+Rel(WebFrontApp, APIGateway,"API Gateway")
+Rel(MobileApp, APIGateway,"API Gateway")
+Rel(SmartTV, APIGateway,"API Gateway")
+Rel(APIGateway, WebApp,"Manage requests", "HTTPS/JSON")
+Rel(WebApp,UserManagementService,"Authorization and user management")
+Rel(UserManagementService,EventsService,"Write data")
+Rel(UserManagementService,UserManagementDB,"Read/Write data")
+Rel(EventsService,Kafka,"Send Message")
+Rel(Kafka,StoreService,"Write data")
+
+Rel(WebApp,FeedbackService,"Write data")
+Rel(FeedbackService,MongoDB,"Read/Write data")
+
+Rel(WebApp,OnlineCinemaTheaterIntegrator,"Write data")
+Rel(OnlineCinemaTheaterIntegrator,OnlineTheaters,"Read data")
+Rel(OnlineCinemaTheaterIntegrator,StoreService,"Write data")
+
+Rel(WebApp,MoviesService,"Read data")
+Rel(MoviesService,recommendations,"Read data")
+
+Rel(WebApp,ReportingService,"Read data")
+
+Rel(ReportingService,StoreService,"Read/Writes data")
+
+Rel(WebApp,PaymentService,"Processes payment requests")
+Rel(PaymentService,payment_api,"Processes payments")
+@enduml
